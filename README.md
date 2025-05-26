@@ -10,10 +10,11 @@ The directory structure of this repository is shown as below:
 
 ```
 .
+|-- CroSec							# Code for training
 |-- data_train_val      # Dataset for training and validation 
 |-- data_eval           # Dataset for evaluation
 |-- results	            # Experimental results
-|-- scripts             # Scripts for training and inference
+|-- scripts             # Scripts for test
 |-- trained	            # Trained LoRA for security.
 |-- setup_codeql.sh
 ```
