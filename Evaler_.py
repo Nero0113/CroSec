@@ -108,26 +108,39 @@ class CO_Evaler:
         self.load_model()
 
     def load_model(self):
-        self.trg_model = AutoModelForCausalLM.from_pretrained(self.args.trg_model)
+        self.trg_model = AutoModelForCausalLM.from_pretrained(self.args.trg_model,trust_remote_code=True)
         self.trg_tokenizer = AutoTokenizer.from_pretrained(self.args.trg_model)
+        self.trg_model.resize_token_embeddings(len(self.trg_tokenizer))
 
-        #
-        # self.trg_tokenizer.eos_token = self.trg_tokenizer.bos_token
-
-        self.src_model = AutoModelForCausalLM.from_pretrained(self.args.src_model)
+        self.src_model = AutoModelForCausalLM.from_pretrained(self.args.src_model,trust_remote_code=True)
         self.src_tokenizer = AutoTokenizer.from_pretrained(self.args.src_model)
         self.src_model.resize_token_embeddings(len(self.src_tokenizer))
         self.src_model = peft.PeftModel.from_pretrained(self.src_model, self.args.lora)
 
-        self.model = EnsembleModel(
-            src_model=self.src_model,
-            trg_model=self.trg_model,
-            src_tokenizer=self.src_tokenizer,
-            trg_tokenizer=self.trg_tokenizer,
-            sparse_matrix_path=self.args.sparse_matrix_path,
-            token_map=self.args.token_map,
-            ensemble_weight=self.args.ensemble_weight  # Equal weight to both models
-        )
+        _ ,src_model_type=coder_model_name(self.args.src_model)
+        _ ,trg_model_type=coder_model_name(self.args.trg_model)
+        print("src_model_type:" + src_model_type)
+        print("trg_model_type:" + trg_model_type)
+        if src_model_type == trg_model_type :
+            self.model = EnsembleFamilyModel(
+                src_model=self.src_model,
+                trg_model=self.trg_model,
+                src_tokenizer=self.src_tokenizer,
+                trg_tokenizer=self.trg_tokenizer,
+                # sparse_matrix_path=self.args.sparse_matrix_path,
+                # token_map=self.args.token_map,
+                ensemble_weight=self.args.ensemble_weight  # Equal weight to both models
+            ) 
+        else:
+            self.model = EnsembleModel(
+                src_model=self.src_model,
+                trg_model=self.trg_model,
+                src_tokenizer=self.src_tokenizer,
+                trg_tokenizer=self.trg_tokenizer,
+                sparse_matrix_path=self.args.sparse_matrix_path,
+                token_map=self.args.token_map,
+                ensemble_weight=self.args.ensemble_weight  # Equal weight to both models
+            )
 
         self.input_device = self.args.device
 
@@ -164,18 +177,16 @@ class CO_Evaler:
 
         return completion
 
-    def replace_gen_prompt(self, prompt: str, model_path: str) -> str:
-        if "starcoder" in model_path.lower():
-            prompt = prompt.replace("<fim_prefix>", "")
-            prompt = prompt.replace("<fim_suffix><fim_middle>", "")
+    def replace_gen_prompt(self, prompt: str, model_path:str) -> str:
+        if "starcoder" in model_path.lower() or "codeshell" in model_path.lower():
+            prompt = prompt.replace("<fim_prefix>","")
+            prompt = prompt.replace("<fim_suffix><fim_middle>","")
 
         else:
-            prompt = prompt.replace(
-                "Please complete the following Python code without providing any additional tasks such as testing or explanations\n",
-                "")
+            prompt = prompt.replace("Please complete the following Python code without providing any additional tasks such as testing or explanations\n","")
         if "starchat" in model_path.lower():
-            prompt = prompt.replace("<|system|>\n<|end|>\n<|user|>", "")
-            prompt = prompt.replace("<|end|>\n<|assistant|>", "")
+            prompt = prompt.replace("<|system|>\n<|end|>\n<|user|>","")
+            prompt = prompt.replace("<|end|>\n<|assistant|>","")
         return prompt
 
     def process_completions(self, input_src, input_ids_len, gen_output, lang):
@@ -183,8 +194,8 @@ class CO_Evaler:
         tokens = gen_output[:, input_ids_len:, ...]
         completions = self.trg_tokenizer.batch_decode(tokens)
         # add for starcoder
-        # if "starcoder" in self.args.trg_model.lower():
-        #     completions = [self.replace_gen_prompt(c, self.args.trg_model) for c in completions]
+        completions = [self.replace_gen_prompt(c, self.args.trg_model) for c in completions]
+        
         output_srcs, output_ids = [], []
         dup_srcs, non_parsed_srcs = [], []
         for i, completion in enumerate(completions):
@@ -214,13 +225,13 @@ class CO_Evaler:
         input_src = file_context + func_context
         input_trg = self.trg_tokenizer(input_src, return_tensors='pt').to(self.trg_model.device)
         input_ids_len = input_trg.input_ids.shape[1]
-        # if "starcoder" in self.args.trg_model.lower():
-        #     input_ids_len = input_ids_len + 3
+        if "starcoder" in self.args.trg_model.lower() or "codeshell" in self.args.trg_model.lower():
+            input_ids_len = input_ids_len + 3
 
         gen_output = self.model.generate(
             **input_trg,
             do_sample=True,
-            num_return_sequences=25,  # Generate 5 different completions
+            num_return_sequences=25,  # Generate 25 different completions
             temperature=self.args.temp,
             max_new_tokens=self.args.max_new_len,
             top_p=self.args.top_p,
