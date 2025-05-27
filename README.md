@@ -10,7 +10,7 @@ The directory structure of this repository is shown as below:
 
 ```
 .
-|-- CroSec							# Code for training
+|-- CroSec	            # Code for training
 |-- data_train_val      # Dataset for training and validation 
 |-- data_eval           # Dataset for evaluation
 |-- results	            # Experimental results
@@ -45,10 +45,10 @@ python ./scripts/get_simi.py
 To train a LoRA for security model, run:
 
 ```
-python train_lora_sec.py
+python ./CroSec/train.py
 ```
 
-**We provide a trained LoRA plugin for Codegen to replicate our experiments.** You can download it from Google Drive: 
+**We provide a trained LoRA plugin for Qwen-2.5-Coder-Intruct-0.5B to replicate our experiments.** You can download it from Google Drive: 
 
 # 🚀 TEST
 

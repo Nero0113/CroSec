@@ -101,7 +101,7 @@ def main(args):
 
     token_map = [-1] * V_src
     for s, t in zip(rows, cols):
-        if token_map[s] == -1:          # 只保留 1-to-1；如需 top-k 可自行修改
+        if token_map[s] == -1:
             token_map[s] = int(t)
 
 
