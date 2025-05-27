@@ -16,6 +16,53 @@ from try_plugin_like.my_model import myQwenForCausalLM
 
 logger = logging.getLogger()
 
+def coder_model_name(model_path):
+    """
+    Determine the model name based on the model path.
+    Args:
+        model_path (str): Path or name of the model.
+    Returns:
+        str: Model name (e.g., 'deepseek-1.3b', 'starcoder2-3b', etc.).
+        str: Model type (e.g., 'deepseek', 'starcoder', etc.).
+    """
+    model_name = None
+    model_type = None
+    if 'deepseek-coder-1.3b-base' in model_path or 'deepseek-1.3b' in model_path:
+        model_name = 'deepseek-1.3b'
+        model_type = 'deepseek'
+
+    elif 'deepseek-coder-6.7b-base' in model_path or 'deepseek-6.7b' in model_path:
+        model_name = 'deepseek-6.7b'
+        model_type = 'deepseek'
+
+    elif 'StarCoder-1B' in model_path:
+        model_name = 'StarCoder-1B'
+        model_type = 'StarCoder'
+
+    elif 'StarCoder-7B' in model_path:
+        model_name = 'StarCoder-7B'
+        model_type = 'StarCoder'
+
+    elif 'Qwen2.5-Coder-3B' in model_path or 'Qwen2.5-3b' in model_path:
+        model_name = 'Qwen2.5-3b'
+        model_type = 'Qwen2.5'
+
+    elif 'Qwen2.5-Coder-7B' in model_path or 'Qwen2.5-7b' in model_path:
+        model_name = 'Qwen2.5-7b'
+        model_type = 'Qwen2.5'
+
+    elif 'Qwen2.5-Coder-0.5B' in model_path or 'Qwen2.5-0.5b' in model_path:
+        model_name = 'Qwen2.5-0.5b'
+        model_type = 'Qwen2.5'
+
+    elif 'CodeShell-7B' in model_path:
+        model_name = 'CodeShell-7B'
+        model_type = 'CodeShell'
+
+    else:
+        raise NotImplementedError()
+    return model_name , model_type
+
 def set_devices(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     args.n_gpu = torch.cuda.device_count()
