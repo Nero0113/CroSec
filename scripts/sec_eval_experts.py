@@ -1,9 +1,11 @@
 import sys
-sys.path.append('../')
+# sys.path.append('../')
 import argparse
 import json
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(BASE_DIR)
+# os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 import shutil
 import subprocess
 from collections import OrderedDict
@@ -18,25 +20,24 @@ import csv
 from Evaler_ import LM_Evaler, CO_Evaler
 
 
-#设置gpu可见
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--output_name', type=str, default='codegen-6b_qwen_lora_test_w03')
+    parser.add_argument('--output_name', type=str, default='deepseek-6.7b_qwen_lora_w03')
 
     parser.add_argument('--eval_type', type=str, choices=['dow', 'dop', 'not_trained'], default='dow')
     parser.add_argument('--vul_type', type=str, default=None)
     parser.add_argument('--model_type', type=str, choices=['lm', 'lora', 'co'], default='co')
 
     parser.add_argument('--trg_model', type=str,
-                        default='/home/public_space/liuchao/shushanfu/LMOps/checkpoints/codegen-6B')
-    parser.add_argument('--src_model', type=str,
-                        default='/home/public_space/yanmeng/lidong/models/Qwen2.5-Coder-0.5B-Instruct')
+                        default='../models/deepseek-coder-6.7b-base')
+    parser.add_argument('--sec_model', type=str,
+                        default='../models/Qwen2.5-Coder-0.5B-Instruct')
     parser.add_argument('--sparse_matrix_path', type=str,
-                        default='/home/public_space/yanmeng/lidong/code/one4all/try_EVA_like/map_files_plugin/Qwen_to_DeepSeek_sim_matrix.npz')
+                        default='../projects/CroSec/mapping_deepseek/src2trg_full.npz')
     parser.add_argument('--token_map', type=str,
-                        default='/home/public_space/yanmeng/zhangjingrui/projects/OFA/emb_map_files/Qwen2.5-0.5b_2_deepseek-6.7b/token_maps/one2one_deepseek-6.7b2Qwen2.5-0.5b-ft_id.json')
+                        default='../Qwen2.5-0.5b_2_deepseek-6.7b/token_maps/one2one_deepseek-6.7b2Qwen2.5-0.5b-ft_id.json')
     parser.add_argument('--lora', type=str,
-                        default='/home/public_space/yanmeng/zhangjingrui/projects/OFA/trained_model/seed_3407/Lora-Qwen2.5-Coder-0.5B-Instruct-sec-2-seed-3407-3500w/checkpoint-last')
+                        default='../trained_model/Lora-Qwen2.5-Coder-0.5B-Instruct-sec-2-seed-3407-3500w/checkpoint-last')
     parser.add_argument('--ensemble_weight', type=float, default=0.3)
 
     parser.add_argument('--data_dir', type=str, default='../data_eval')
@@ -151,7 +152,6 @@ def filter_cwe78_fps(s_out_dir, control):
                 csv_f.write(line)
 
 
-
 def eval_single(args, evaler, controls, output_dir, data_dir, vul_type, scenario):
     s_out_dir = os.path.join(output_dir, scenario)
     os.makedirs(s_out_dir, exist_ok=True)
@@ -220,13 +220,10 @@ def eval_single(args, evaler, controls, output_dir, data_dir, vul_type, scenario
         d['non_parsed'] = len(non_parsed_srcs)
         d['model_type'] = args.model_type
         d['target_model'] = args.trg_model
-        d['source_model'] = args.src_model
+        d['secure_model'] = args.sec_model
         d['temp'] = args.temp
 
         yield d
-
-
-
 
 
 def eval_dow(args, evaler, controls, vul_types):
@@ -241,9 +238,6 @@ def eval_dow(args, evaler, controls, vul_types):
                     s = json.dumps(d)
                     args.logger.info(s)
                     f.write(s + '\n')
-
-
-
 
 
 if __name__ == '__main__':

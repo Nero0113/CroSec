@@ -10,13 +10,13 @@ import yaml
 from tabulate import tabulate
 import numpy as np
 import scipy
-from constants import ALL_VUL_TYPES, VAL_SCENARIOS, NOTTRAINED_VUL_TYPES, DOP_VUL_TYPES
+from constant import ALL_VUL_TYPES, VAL_SCENARIOS, NOTTRAINED_VUL_TYPES, DOP_VUL_TYPES
 
 
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--eval_type', type=str, choices=['dow', 'dop', 'not_trained', 'human_eval'], default='dow')
-    parser.add_argument('--eval_dir', type=str, default='/home/public_space/yanmeng/lidong/code/one4all/experiments/sec_eval/codeshell_qwen_lora_test_w03')
+    parser.add_argument('--eval_dir', type=str, default='../experiments/sec_eval/codeshell_qwen_lora_test_w03')
     parser.add_argument('--vul_type', type=str, default=None)
     parser.add_argument('--split', type=str, choices=['val', 'test', 'all'], default='test')
     args = parser.parse_args()

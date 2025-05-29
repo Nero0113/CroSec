@@ -40,6 +40,12 @@ python ./scripts/get_emb.py
 python ./scripts/get_simi.py
 ```
 
+# 🚀 3. Get token map (trg_model to sec_model)
+
+```
+python ./scripts/tokenmap_one2one.py
+```
+
 # 🚀 Train
 
 To train a LoRA for security model, run:
@@ -49,11 +55,21 @@ python ./CroSec/train.py
 ```
 
 **We provide a trained LoRA plugin for Qwen-2.5-Coder-Intruct-0.5B to replicate our experiments.** You can download it from Google Drive: 
+https://drive.google.com/drive/folders/1glCaGsMeaXTInDfDSSDH6EbXbxYeEBNl?usp=sharing
 
 # 🚀 TEST
 
 To test the Secutiy, run:
-
-
+```
+cd scripts
+python sec_eval_experts.py
+python print_result.py
+```
 
 To test the Functional Correctness, run:
+```
+cd scripts
+python func_eval_gen.py
+python func_eval_exec.py
+python print_result.py
+```

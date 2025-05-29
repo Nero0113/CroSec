@@ -26,13 +26,13 @@ from typing import Optional, Tuple, Callable, List, Union, Dict, Any
 class EnsembleModel:
     def __init__(
             self,
-            src_model_path=None,
+            sec_model_path=None,
             trg_model_path=None,
             sparse_matrix_path=None,
             token_map=None,
-            src_model=None,
+            sec_model=None,
             trg_model=None,
-            src_tokenizer=None,
+            sec_tokenizer=None,
             trg_tokenizer=None,
             ensemble_weight=0.5
     ):
@@ -40,25 +40,32 @@ class EnsembleModel:
         Initialize the ensemble model with source and target models
 
         Args:
-            src_model_path: Path to the source model
+            sec_model_path: Path to the source model
             trg_model_path: Path to the target model
             sparse_matrix_path: Path to the sparse similarity matrix for vocabulary mapping
-            src_model: Pre-loaded source model (optional)
+            sec_model: Pre-loaded source model (optional)
             trg_model: Pre-loaded target model (optional)
-            src_tokenizer: Pre-loaded source tokenizer (optional)
+            sec_tokenizer: Pre-loaded source tokenizer (optional)
             trg_tokenizer: Pre-loaded target tokenizer (optional)
             ensemble_weight: Weight for ensemble (0.5 means equal weight to both models)
         """
         # Load tokenizers
-        self.src_tokenizer = src_tokenizer or AutoTokenizer.from_pretrained(src_model_path)
+        self.sec_tokenizer = sec_tokenizer or AutoTokenizer.from_pretrained(sec_model_path)
         self.trg_tokenizer = trg_tokenizer or AutoTokenizer.from_pretrained(trg_model_path)
 
         # Load models
-        self.src_model = src_model.to('cuda') or AutoModelForCausalLM.from_pretrained(src_model_path).to('cuda')
-        self.trg_model = trg_model.to('cuda') or AutoModelForCausalLM.from_pretrained(trg_model_path).to('cuda')
+        # self.sec_model = sec_model.to('cuda') or AutoModelForCausalLM.from_pretrained(sec_model_path).to('cuda')
+        # self.trg_model = trg_model.to('cuda') or AutoModelForCausalLM.from_pretrained(trg_model_path).to('cuda')
+        num_gpus = torch.cuda.device_count()
+        if num_gpus >= 2:
+            self.sec_model = (sec_model.to('cuda:0') if sec_model else AutoModelForCausalLM.from_pretrained(sec_model_path).to('cuda:0'))
+            self.trg_model = (trg_model.to('cuda:1') if trg_model else AutoModelForCausalLM.from_pretrained(trg_model_path).to('cuda:1'))
+        else:
+            self.sec_model = (sec_model.to('cuda:0') if sec_model else AutoModelForCausalLM.from_pretrained(sec_model_path).to('cuda:0'))
+            self.trg_model = (trg_model.to('cuda:0') if trg_model else AutoModelForCausalLM.from_pretrained(trg_model_path).to('cuda:0'))
 
         self.trg_model.resize_token_embeddings(len(self.trg_tokenizer))
-        self.src_model.resize_token_embeddings(len(self.src_tokenizer))
+        self.sec_model.resize_token_embeddings(len(self.sec_tokenizer))
 
         self.ensemble_weight = ensemble_weight
         
@@ -68,15 +75,15 @@ class EnsembleModel:
         spmat = sp.load_npz(sparse_matrix_path)
         # Load sparse mapping matrix
         self.sparse_matrix = torch.sparse_csr_tensor(
-            torch.tensor(spmat.indptr, dtype=torch.int32, device=self.src_model.device),
-            torch.tensor(spmat.indices, dtype=torch.int32, device=self.src_model.device),
-            torch.tensor(spmat.data, dtype=torch.float32, device=self.src_model.device),
-            size=spmat.shape, device=self.src_model.device)
+            torch.tensor(spmat.indptr, dtype=torch.int32, device=self.sec_model.device),
+            torch.tensor(spmat.indices, dtype=torch.int32, device=self.sec_model.device),
+            torch.tensor(spmat.data, dtype=torch.float32, device=self.sec_model.device),
+            size=spmat.shape, device=self.sec_model.device)
 
         # 断言
-        assert self.sparse_matrix.size(0) == len(self.src_tokenizer)
-        # assert len(self.token_map) == len(self.src_tokenizer)
-        assert self.src_model.get_input_embeddings().num_embeddings == len(self.src_tokenizer)
+        assert self.sparse_matrix.size(0) == len(self.sec_tokenizer)
+        # assert len(self.token_map) == len(self.sec_tokenizer)
+        assert self.sec_model.get_input_embeddings().num_embeddings == len(self.sec_tokenizer)
         assert self.trg_model.get_input_embeddings().num_embeddings == len(self.trg_tokenizer)
 
         # self.token_map = json.load(open(token_map, 'r'))
@@ -87,7 +94,7 @@ class EnsembleModel:
         # self.ensemble_weight = ensemble_weight
 
         # Set models to evaluation mode
-        self.src_model.eval()
+        self.sec_model.eval()
         self.trg_model.eval()
 
     def format_starcoder_prompt(self, prompt):
@@ -230,16 +237,16 @@ class EnsembleModel:
         """
         # Set up base kwargs for both models
         trg_model_kwargs = kwargs.copy()
-        src_model_kwargs = kwargs.copy()
+        sec_model_kwargs = kwargs.copy()
 
         if use_cache:
             trg_model_kwargs["use_cache"] = use_cache
-            src_model_kwargs["use_cache"] = use_cache
+            sec_model_kwargs["use_cache"] = use_cache
 
         # Add attention mask if provided
         if attention_mask is not None:
             trg_model_kwargs["attention_mask"] = attention_mask
-            src_model_kwargs["attention_mask"] = attention_mask
+            sec_model_kwargs["attention_mask"] = attention_mask
 
         # Set up logits processors and warpers
         logits_processor = logits_processor if logits_processor is not None else LogitsProcessorList()
@@ -276,23 +283,23 @@ class EnsembleModel:
         #     input_ids = self._expand_inputs_for_generation(num_return_sequences, input_ids)
         #     if attention_mask is not None:
         #         trg_model_kwargs["attention_mask"] = attention_mask.repeat_interleave(num_return_sequences, dim=0)
-        #         src_model_kwargs["attention_mask"] = attention_mask.repeat_interleave(num_return_sequences, dim=0)
+        #         sec_model_kwargs["attention_mask"] = attention_mask.repeat_interleave(num_return_sequences, dim=0)
 
         text = self.trg_tokenizer.decode(input_ids[0], skip_special_tokens=True)
-        # src_input = self.src_tokenizer(text, return_tensors='pt')
+        # sec_input = self.sec_tokenizer(text, return_tensors='pt')
 
-        # ---- Starcoder: FIM prompt formatting ----for src_model
-        if "starcoder" in self.src_model.config.name_or_path.lower() or "codeshell" in self.src_model.config.name_or_path.lower():
+        # ---- Starcoder: FIM prompt formatting ----for sec_model
+        if "starcoder" in self.sec_model.config.name_or_path.lower() or "codeshell" in self.sec_model.config.name_or_path.lower():
             fim_input = self.format_starcoder_prompt(text)
-            src_input = self.src_tokenizer(fim_input, return_tensors="pt").to(self.src_model.device)
-            src_input_ids = src_input.input_ids.to(self.src_model.device)
+            sec_input = self.sec_tokenizer(fim_input, return_tensors="pt").to(self.sec_model.device)
+            sec_input_ids = sec_input.input_ids.to(self.sec_model.device)
             if attention_mask is not None:
-                src_model_kwargs["attention_mask"] = src_input.attention_mask
+                sec_model_kwargs["attention_mask"] = sec_input.attention_mask
         else:
-            src_input = self.src_tokenizer(text, return_tensors='pt')
-            src_input_ids = src_input.input_ids.to(self.src_model.device)
+            sec_input = self.sec_tokenizer(text, return_tensors='pt')
+            sec_input_ids = sec_input.input_ids.to(self.sec_model.device)
             if attention_mask is not None:
-                src_model_kwargs["attention_mask"] = src_input.attention_mask
+                sec_model_kwargs["attention_mask"] = sec_input.attention_mask
 
         # ---- Starcoder: FIM prompt formatting ----for trg_model
         if "starcoder" in self.trg_model.config.name_or_path.lower() or "codeshell" in self.trg_model.config.name_or_path.lower():
@@ -306,22 +313,22 @@ class EnsembleModel:
         # Expand inputs for multiple sequences if needed
         if num_return_sequences > 1:
             input_ids = self._expand_inputs_for_generation(num_return_sequences, input_ids)
-            src_input_ids = self._expand_inputs_for_generation(num_return_sequences, src_input_ids)
-            src_input_ids = src_input_ids.to(self.src_model.device)
+            sec_input_ids = self._expand_inputs_for_generation(num_return_sequences, sec_input_ids)
+            sec_input_ids = sec_input_ids.to(self.sec_model.device)
             if attention_mask is not None:
                 trg_model_kwargs["attention_mask"] = attention_mask.repeat_interleave(num_return_sequences, dim=0)
-                src_model_kwargs["attention_mask"] = attention_mask.repeat_interleave(num_return_sequences, dim=0)
+                sec_model_kwargs["attention_mask"] = attention_mask.repeat_interleave(num_return_sequences, dim=0)
         else:
 
-            src_input_ids = src_input.input_ids.to(self.src_model.device)
+            sec_input_ids = sec_input.input_ids.to(self.sec_model.device)
             if attention_mask is not None:
                 trg_model_kwargs["attention_mask"] = attention_mask.repeat_interleave(num_return_sequences, dim=0)
-                src_model_kwargs["attention_mask"] = attention_mask.repeat_interleave(num_return_sequences, dim=0)
+                sec_model_kwargs["attention_mask"] = attention_mask.repeat_interleave(num_return_sequences, dim=0)
         # Move inputs to correct devices
         input_ids = input_ids.to(self.trg_model.device)
         trg_model_kwargs = {k: v.to(self.trg_model.device) if hasattr(v, 'to') else v for k, v in trg_model_kwargs.items()}
-        src_input_ids = src_input_ids.to(self.src_model.device)
-        src_model_kwargs = {k: v.to(self.src_model.device) if hasattr(v, 'to') else v for k, v in src_model_kwargs.items()}
+        sec_input_ids = sec_input_ids.to(self.sec_model.device)
+        sec_model_kwargs = {k: v.to(self.sec_model.device) if hasattr(v, 'to') else v for k, v in sec_model_kwargs.items()}
 
         # Keep track of which sequences are finished
         batch_size = input_ids.shape[0]
@@ -337,36 +344,36 @@ class EnsembleModel:
             trg_model_inputs = self.trg_model.prepare_inputs_for_generation(input_ids, **trg_model_kwargs)
 
             # Create position IDs explicitly for source model to avoid shape mismatch
-            src_position_ids = torch.arange(src_input_ids.shape[1], dtype=torch.long, device=src_input_ids.device)
-            src_position_ids = src_position_ids.unsqueeze(0).expand_as(src_input_ids)
+            sec_position_ids = torch.arange(sec_input_ids.shape[1], dtype=torch.long, device=sec_input_ids.device)
+            sec_position_ids = sec_position_ids.unsqueeze(0).expand_as(sec_input_ids)
 
             # Prepare source model inputs with explicit position IDs
-            src_model_kwargs_copy = src_model_kwargs.copy()
-            src_model_kwargs_copy["position_ids"] = src_position_ids
-            src_model_inputs = self.src_model.prepare_inputs_for_generation(src_input_ids, **src_model_kwargs_copy)
+            sec_model_kwargs_copy = sec_model_kwargs.copy()
+            sec_model_kwargs_copy["position_ids"] = sec_position_ids
+            sec_model_inputs = self.sec_model.prepare_inputs_for_generation(sec_input_ids, **sec_model_kwargs_copy)
 
-            ids = src_model_inputs["input_ids"]
-            if torch.any(ids >= self.src_tokenizer.vocab_size) or torch.any(ids < 0):
-                bad = ids[(ids >= self.src_tokenizer.vocab_size) | (ids < 0)]
+            ids = sec_model_inputs["input_ids"]
+            if torch.any(ids >= self.sec_tokenizer.vocab_size) or torch.any(ids < 0):
+                bad = ids[(ids >= self.sec_tokenizer.vocab_size) | (ids < 0)]
                 print("[FATAL] illegal token ids:", bad[:10], "  max_id:", ids.max(), "  min_id:", ids.min())
                 raise ValueError("found out-of-range token ids")
 
             # Get outputs from both models
             trg_outputs = self.trg_model(**trg_model_inputs, return_dict=True)
-            src_outputs = self.src_model(**src_model_inputs, return_dict=True)
+            sec_outputs = self.sec_model(**sec_model_inputs, return_dict=True)
 
             # Get next token logits
             trg_next_token_logits = trg_outputs.logits[:, -1, :]
-            src_next_token_logits = src_outputs.logits[:, -1, :]
+            sec_next_token_logits = sec_outputs.logits[:, -1, :]
 
             # Map source logits to target vocabulary space using sparse matrix
-            src_next_token_logits = src_next_token_logits.to(torch.float32)
+            sec_next_token_logits = sec_next_token_logits.to(torch.float32)
 
             # Convert to probability distributions
-            src_probs = nn.functional.softmax(src_next_token_logits, dim=-1)
+            sec_probs = nn.functional.softmax(sec_next_token_logits, dim=-1)
 
-            mapped_src_probs = torch.spmm(src_probs, self.sparse_matrix)  # [B, V_trg]
-            mapped_src_probs = mapped_src_probs.clamp_min_(1e-20).to(trg_next_token_logits.device)
+            mapped_sec_probs = torch.spmm(sec_probs, self.sparse_matrix)  # [B, V_trg]
+            mapped_sec_probs = mapped_sec_probs.clamp_min_(1e-20).to(trg_next_token_logits.device)
 
             # Convert target logits to probabilities
             trg_probs = nn.functional.softmax(trg_next_token_logits, dim=-1)
@@ -374,7 +381,7 @@ class EnsembleModel:
 
             invalid_mask = (self.trg2src == -1)
 
-            ensemble_probs = (1 - self.ensemble_weight) * trg_probs + self.ensemble_weight * mapped_src_probs
+            ensemble_probs = (1 - self.ensemble_weight) * trg_probs + self.ensemble_weight * mapped_sec_probs
             ensemble_probs[:, invalid_mask] = 0
             assert self.sparse_matrix.size(1) == ensemble_probs.size(-1)  # 若已放在 generate 里
 
@@ -407,10 +414,10 @@ class EnsembleModel:
 
 
             # Convert to tensor
-            next_src_tokens = self.trg2src[next_tokens]
-            next_src_tokens = next_src_tokens.to(self.src_model.device)
+            next_sec_tokens = self.trg2src[next_tokens]
+            next_sec_tokens = next_sec_tokens.to(self.sec_model.device)
             # Update source input IDs
-            src_input_ids = torch.cat([src_input_ids, next_src_tokens[:, None]], dim=-1)
+            sec_input_ids = torch.cat([sec_input_ids, next_sec_tokens[:, None]], dim=-1)
 
             # Update target model kwargs for next generation step
             trg_model_kwargs = self._update_model_kwargs_for_generation(
@@ -421,15 +428,15 @@ class EnsembleModel:
 
             # For source model, we'll reset most kwargs since we're re-processing tokens
             # But we'll keep the cache if it exists
-            if use_cache and "past_key_values" in src_model_kwargs:
+            if use_cache and "past_key_values" in sec_model_kwargs:
                 # Extract past key values
                 past_key_values = self._extract_past_from_model_output(
-                    src_outputs, standardize_cache_format=False
+                    sec_outputs, standardize_cache_format=False
                 )
-                src_model_kwargs = {"past_key_values": past_key_values, "use_cache": True}
+                sec_model_kwargs = {"past_key_values": past_key_values, "use_cache": True}
             else:
                 # Reset to empty dict if not using cache
-                src_model_kwargs = {"use_cache": use_cache}
+                sec_model_kwargs = {"use_cache": use_cache}
 
             # Update which sequences are finished
             unfinished_sequences = unfinished_sequences & ~stopping_criteria(input_ids, scores)
@@ -437,7 +444,7 @@ class EnsembleModel:
 
             # Clean up memory for this iteration
             del trg_outputs
-            del src_outputs
+            del sec_outputs
 
             # Break if all sequences are finished
             if this_peer_finished:
@@ -449,13 +456,13 @@ class EnsembleModel:
 class EnsembleFamilyModel:
     def __init__(
             self,
-            src_model_path=None,
+            sec_model_path=None,
             trg_model_path=None,
             sparse_matrix_path=None,
             token_map=None,
-            src_model=None,
+            sec_model=None,
             trg_model=None,
-            src_tokenizer=None,
+            sec_tokenizer=None,
             trg_tokenizer=None,
             ensemble_weight=0.5
     ):
@@ -463,30 +470,37 @@ class EnsembleFamilyModel:
         Initialize the ensemble model with source and target models
 
         Args:
-            src_model_path: Path to the source model
+            sec_model_path: Path to the source model
             trg_model_path: Path to the target model
             sparse_matrix_path: Path to the sparse similarity matrix for vocabulary mapping
-            src_model: Pre-loaded source model (optional)
+            sec_model: Pre-loaded source model (optional)
             trg_model: Pre-loaded target model (optional)
-            src_tokenizer: Pre-loaded source tokenizer (optional)
+            sec_tokenizer: Pre-loaded source tokenizer (optional)
             trg_tokenizer: Pre-loaded target tokenizer (optional)
             ensemble_weight: Weight for ensemble (0.5 means equal weight to both models)
         """
         # Load tokenizers
-        self.src_tokenizer = src_tokenizer or AutoTokenizer.from_pretrained(src_model_path)
+        self.sec_tokenizer = sec_tokenizer or AutoTokenizer.from_pretrained(sec_model_path)
         self.trg_tokenizer = trg_tokenizer or AutoTokenizer.from_pretrained(trg_model_path)
 
         # Load models
-        self.src_model = src_model.to('cuda') or AutoModelForCausalLM.from_pretrained(src_model_path).to('cuda')
-        self.trg_model = trg_model.to('cuda') or AutoModelForCausalLM.from_pretrained(trg_model_path).to('cuda')
+        # self.sec_model = sec_model.to('cuda') or AutoModelForCausalLM.from_pretrained(sec_model_path).to('cuda')
+        # self.trg_model = trg_model.to('cuda') or AutoModelForCausalLM.from_pretrained(trg_model_path).to('cuda')
+        num_gpus = torch.cuda.device_count()
+        if num_gpus >= 2:
+            self.sec_model = (sec_model.to('cuda:0') if sec_model else AutoModelForCausalLM.from_pretrained(sec_model_path).to('cuda:0'))
+            self.trg_model = (trg_model.to('cuda:1') if trg_model else AutoModelForCausalLM.from_pretrained(trg_model_path).to('cuda:1'))
+        else:
+            self.sec_model = (sec_model.to('cuda:0') if sec_model else AutoModelForCausalLM.from_pretrained(sec_model_path).to('cuda:0'))
+            self.trg_model = (trg_model.to('cuda:0') if trg_model else AutoModelForCausalLM.from_pretrained(trg_model_path).to('cuda:0'))
 
         self.trg_model.resize_token_embeddings(len(self.trg_tokenizer))
-        self.src_model.resize_token_embeddings(len(self.src_tokenizer))
+        self.sec_model.resize_token_embeddings(len(self.sec_tokenizer))
 
         self.ensemble_weight = ensemble_weight
 
         # Set models to evaluation mode
-        self.src_model.eval()
+        self.sec_model.eval()
         self.trg_model.eval()
 
     def format_starcoder_prompt(self, prompt):
@@ -629,16 +643,16 @@ class EnsembleFamilyModel:
         """
         # Set up base kwargs for both models
         trg_model_kwargs = kwargs.copy()
-        src_model_kwargs = kwargs.copy()
+        sec_model_kwargs = kwargs.copy()
 
         if use_cache:
             trg_model_kwargs["use_cache"] = use_cache
-            src_model_kwargs["use_cache"] = use_cache
+            sec_model_kwargs["use_cache"] = use_cache
 
         # Add attention mask if provided
         if attention_mask is not None:
             trg_model_kwargs["attention_mask"] = attention_mask
-            src_model_kwargs["attention_mask"] = attention_mask
+            sec_model_kwargs["attention_mask"] = attention_mask
 
         # Set up logits processors and warpers
         logits_processor = logits_processor if logits_processor is not None else LogitsProcessorList()
@@ -671,34 +685,34 @@ class EnsembleFamilyModel:
         raw_logits = ()
 
         text = self.trg_tokenizer.decode(input_ids[0], skip_special_tokens=True)
-        src_input = self.src_tokenizer(text, return_tensors='pt').to(self.src_model.device)
-        src_input_ids = src_input.input_ids.to(self.src_model.device)
+        sec_input = self.sec_tokenizer(text, return_tensors='pt').to(self.sec_model.device)
+        sec_input_ids = sec_input.input_ids.to(self.sec_model.device)
 
         # ---- Starcoder: FIM prompt formatting ----
         if "starcoder" in self.trg_model.config.name_or_path.lower() or "codeshell" in self.trg_model.config.name_or_path.lower():
             fim_input = self.format_starcoder_prompt(text)         
             inputs = self.trg_tokenizer(fim_input, return_tensors="pt").to(self.trg_model.device)
-            src_input = self.src_tokenizer(fim_input, return_tensors='pt').to(self.src_model.device)
+            sec_input = self.sec_tokenizer(fim_input, return_tensors='pt').to(self.sec_model.device)
             input_ids = inputs.input_ids.to(self.trg_model.device)
-            src_input_ids = src_input.input_ids.to(self.src_model.device)
+            sec_input_ids = sec_input.input_ids.to(self.sec_model.device)
             if attention_mask is not None:
                 trg_model_kwargs["attention_mask"] = inputs.attention_mask
-                src_model_kwargs["attention_mask"] = src_input.attention_mask
+                sec_model_kwargs["attention_mask"] = sec_input.attention_mask
 
         # Expand inputs for multiple sequences if needed
         if num_return_sequences > 1:
             input_ids = self._expand_inputs_for_generation(num_return_sequences, input_ids)
-            src_input_ids = self._expand_inputs_for_generation(num_return_sequences, src_input.input_ids)
-            src_input_ids = src_input_ids.to(self.src_model.device)
+            sec_input_ids = self._expand_inputs_for_generation(num_return_sequences, sec_input.input_ids)
+            sec_input_ids = sec_input_ids.to(self.sec_model.device)
             if attention_mask is not None:
                 trg_model_kwargs["attention_mask"] = trg_model_kwargs["attention_mask"].repeat_interleave(num_return_sequences, dim=0)
-                src_model_kwargs["attention_mask"] = src_model_kwargs["attention_mask"].repeat_interleave(num_return_sequences, dim=0)
+                sec_model_kwargs["attention_mask"] = sec_model_kwargs["attention_mask"].repeat_interleave(num_return_sequences, dim=0)
 
         # Move inputs to correct devices
         input_ids = input_ids.to(self.trg_model.device)
         trg_model_kwargs = {k: v.to(self.trg_model.device) if hasattr(v, 'to') else v for k, v in trg_model_kwargs.items()}
-        src_input_ids = src_input_ids.to(self.src_model.device)
-        src_model_kwargs = {k: v.to(self.src_model.device) if hasattr(v, 'to') else v for k, v in src_model_kwargs.items()}
+        sec_input_ids = sec_input_ids.to(self.sec_model.device)
+        sec_model_kwargs = {k: v.to(self.sec_model.device) if hasattr(v, 'to') else v for k, v in sec_model_kwargs.items()}
 
         # Keep track of which sequences are finished
         batch_size = input_ids.shape[0]
@@ -714,46 +728,46 @@ class EnsembleFamilyModel:
             trg_model_inputs = self.trg_model.prepare_inputs_for_generation(input_ids, **trg_model_kwargs)
 
             # Create position IDs explicitly for source model to avoid shape mismatch
-            src_position_ids = torch.arange(src_input_ids.shape[1], dtype=torch.long, device=src_input_ids.device)
-            src_position_ids = src_position_ids.unsqueeze(0).expand_as(src_input_ids)
+            sec_position_ids = torch.arange(sec_input_ids.shape[1], dtype=torch.long, device=sec_input_ids.device)
+            sec_position_ids = sec_position_ids.unsqueeze(0).expand_as(sec_input_ids)
 
             # Prepare source model inputs with explicit position IDs
-            src_model_kwargs_copy = src_model_kwargs.copy()
-            src_model_kwargs_copy["position_ids"] = src_position_ids
-            src_model_inputs = self.src_model.prepare_inputs_for_generation(src_input_ids, **src_model_kwargs_copy)
+            sec_model_kwargs_copy = sec_model_kwargs.copy()
+            sec_model_kwargs_copy["position_ids"] = sec_position_ids
+            sec_model_inputs = self.sec_model.prepare_inputs_for_generation(sec_input_ids, **sec_model_kwargs_copy)
 
             # Get outputs from both models
             trg_outputs = self.trg_model(**trg_model_inputs, return_dict=True)
-            src_outputs = self.src_model(**src_model_inputs, return_dict=True)
+            sec_outputs = self.sec_model(**sec_model_inputs, return_dict=True)
 
             # Get next token logits
             trg_next_token_logits = trg_outputs.logits[:, -1, :]
-            src_next_token_logits = src_outputs.logits[:, -1, :]
+            sec_next_token_logits = sec_outputs.logits[:, -1, :]
 
             # Map source logits to target vocabulary space using sparse matrix
-            src_next_token_logits = src_next_token_logits.to(torch.float32)
+            sec_next_token_logits = sec_next_token_logits.to(torch.float32)
 
             # Top-k filtering for source logits before mapping (不能少)
             # if top_k > 0:
-            #     src_indices_to_remove, filter_value = self._get_topk_mask(src_next_token_logits, top_k=top_k)
-            #     src_next_token_logits = src_next_token_logits.masked_fill(src_indices_to_remove, filter_value)
+            #     sec_indices_to_remove, filter_value = self._get_topk_mask(sec_next_token_logits, top_k=top_k)
+            #     sec_next_token_logits = sec_next_token_logits.masked_fill(sec_indices_to_remove, filter_value)
 
             # Convert to probability distributions
-            src_probs = nn.functional.softmax(src_next_token_logits, dim=-1)
+            sec_probs = nn.functional.softmax(sec_next_token_logits, dim=-1)
 
             # Transform source probabilities to target vocabulary space
-            # src_probs_t = src_probs.t()
-            # mapped_src_probs = torch.spmm(self.sparse_matrix.to(src_probs.device), src_probs_t)
-            # mapped_src_probs = mapped_src_probs.t().to(trg_next_token_logits.device)
-            # mapped_src_probs = torch.spmm(src_probs, self.sparse_matrix)  # [B, V_trg]
-            mapped_src_probs = src_probs
-            mapped_src_probs = mapped_src_probs.clamp_min_(1e-20).to(trg_next_token_logits.device)
+            # sec_probs_t = sec_probs.t()
+            # mapped_sec_probs = torch.spmm(self.sparse_matrix.to(sec_probs.device), sec_probs_t)
+            # mapped_sec_probs = mapped_sec_probs.t().to(trg_next_token_logits.device)
+            # mapped_sec_probs = torch.spmm(sec_probs, self.sparse_matrix)  # [B, V_trg]
+            mapped_sec_probs = sec_probs
+            mapped_sec_probs = mapped_sec_probs.clamp_min_(1e-20).to(trg_next_token_logits.device)
 
             # Convert target logits to probabilities
             trg_probs = nn.functional.softmax(trg_next_token_logits, dim=-1)
 
             #Ensemble the probabilities
-            ensemble_probs = (1 - self.ensemble_weight) * trg_probs + self.ensemble_weight * mapped_src_probs
+            ensemble_probs = (1 - self.ensemble_weight) * trg_probs + self.ensemble_weight * mapped_sec_probs
 
             ensemble_probs = ensemble_probs / ensemble_probs.sum(dim=-1, keepdim=True)  # ②
             next_token_logits = torch.log(ensemble_probs)
@@ -784,11 +798,11 @@ class EnsembleFamilyModel:
 
 
             # Convert to tensor
-            # next_src_tokens = self.trg2src[next_tokens]
-            next_src_tokens = next_tokens.to(self.src_model.device)
+            # next_sec_tokens = self.trg2src[next_tokens]
+            next_sec_tokens = next_tokens.to(self.sec_model.device)
    
             # Update source input IDs
-            src_input_ids = torch.cat([src_input_ids, next_src_tokens[:, None]], dim=-1)
+            sec_input_ids = torch.cat([sec_input_ids, next_sec_tokens[:, None]], dim=-1)
 
             # Update target model kwargs for next generation step
             trg_model_kwargs = self._update_model_kwargs_for_generation(
@@ -799,15 +813,15 @@ class EnsembleFamilyModel:
 
             # For source model, we'll reset most kwargs since we're re-processing tokens
             # But we'll keep the cache if it exists
-            if use_cache and "past_key_values" in src_model_kwargs:
+            if use_cache and "past_key_values" in sec_model_kwargs:
                 # Extract past key values
                 past_key_values = self._extract_past_from_model_output(
-                    src_outputs, standardize_cache_format=False
+                    sec_outputs, standardize_cache_format=False
                 )
-                src_model_kwargs = {"past_key_values": past_key_values, "use_cache": True}
+                sec_model_kwargs = {"past_key_values": past_key_values, "use_cache": True}
             else:
                 # Reset to empty dict if not using cache
-                src_model_kwargs = {"use_cache": use_cache}
+                sec_model_kwargs = {"use_cache": use_cache}
 
             # Update which sequences are finished
             unfinished_sequences = unfinished_sequences & ~stopping_criteria(input_ids, scores)
@@ -815,7 +829,7 @@ class EnsembleFamilyModel:
 
             # Clean up memory for this iteration
             del trg_outputs
-            del src_outputs
+            del sec_outputs
 
             # Break if all sequences are finished
             if this_peer_finished:

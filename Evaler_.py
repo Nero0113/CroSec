@@ -4,9 +4,9 @@ import peft
 from peft import PeftModel
 from transformers import AutoTokenizer, CodeGenForCausalLM, AutoModelForCausalLM
 
-from Ensemble_model import EnsembleModel
+from Ensemble_model import EnsembleModel,EnsembleFamilyModel
 #from scripts.co_generation import CodegenModelLM
-from utils import load_model, try_parse
+from utils import load_model, try_parse, coder_model_name
 
 
 class LM_Evaler:
@@ -112,20 +112,20 @@ class CO_Evaler:
         self.trg_tokenizer = AutoTokenizer.from_pretrained(self.args.trg_model)
         self.trg_model.resize_token_embeddings(len(self.trg_tokenizer))
 
-        self.src_model = AutoModelForCausalLM.from_pretrained(self.args.src_model,trust_remote_code=True)
-        self.src_tokenizer = AutoTokenizer.from_pretrained(self.args.src_model)
-        self.src_model.resize_token_embeddings(len(self.src_tokenizer))
-        self.src_model = peft.PeftModel.from_pretrained(self.src_model, self.args.lora)
+        self.sec_model = AutoModelForCausalLM.from_pretrained(self.args.sec_model,trust_remote_code=True)
+        self.sec_tokenizer = AutoTokenizer.from_pretrained(self.args.sec_model)
+        self.sec_model.resize_token_embeddings(len(self.sec_tokenizer))
+        self.sec_model = peft.PeftModel.from_pretrained(self.sec_model, self.args.lora)
 
-        _ ,src_model_type=coder_model_name(self.args.src_model)
+        _ ,sec_model_type=coder_model_name(self.args.sec_model)
         _ ,trg_model_type=coder_model_name(self.args.trg_model)
-        print("src_model_type:" + src_model_type)
+        print("sec_model_type:" + sec_model_type)
         print("trg_model_type:" + trg_model_type)
-        if src_model_type == trg_model_type :
+        if sec_model_type == trg_model_type :
             self.model = EnsembleFamilyModel(
-                src_model=self.src_model,
+                sec_model=self.sec_model,
                 trg_model=self.trg_model,
-                src_tokenizer=self.src_tokenizer,
+                sec_tokenizer=self.sec_tokenizer,
                 trg_tokenizer=self.trg_tokenizer,
                 # sparse_matrix_path=self.args.sparse_matrix_path,
                 # token_map=self.args.token_map,
@@ -133,9 +133,9 @@ class CO_Evaler:
             ) 
         else:
             self.model = EnsembleModel(
-                src_model=self.src_model,
+                sec_model=self.sec_model,
                 trg_model=self.trg_model,
-                src_tokenizer=self.src_tokenizer,
+                sec_tokenizer=self.sec_tokenizer,
                 trg_tokenizer=self.trg_tokenizer,
                 sparse_matrix_path=self.args.sparse_matrix_path,
                 token_map=self.args.token_map,

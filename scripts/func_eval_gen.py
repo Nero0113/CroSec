@@ -5,7 +5,7 @@ from transformers import set_seed
 sys.path.append('../')
 import argparse
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 import shutil
 from pathlib import Path
 
@@ -19,8 +19,8 @@ from utils import load_model
 def get_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--output_name', type=str, default='StarCoder2_qwen_lora_w02')
-    parser.add_argument('--model_name', type=str, default='deepseek-coder-1.3b')
+    parser.add_argument('--output_name', type=str, default='StarCoder_qwen_lora_w03')
+    parser.add_argument('--model_name', type=str, default=None)
     parser.add_argument('--eval_type', type=str, default='human_eval')
     parser.add_argument('--target', type=str, choices=['base_model','sec_model', 'one4all'], default='one4all')
     parser.add_argument('--temp', type=float, default=0.4)
@@ -28,19 +28,19 @@ def get_args():
     parser.add_argument('--max_new_len', type=int, default=256)
     parser.add_argument('--num_samples', type=int, default=100)
     parser.add_argument('--num_samples_per_gen', type=int, default=25)
-    # parser.add_argument('--ensemble_weight', type=float, default=0.7)
+    parser.add_argument('--ensemble_weight', type=float, default=0.3)
 
     parser.add_argument('--trg_model', type=str,
-                        default='/home/public_space/yanmeng/zhangjingrui/models/starcoder2-7b')
-    parser.add_argument('--src_model', type=str,
-                        default='/home/public_space/yanmeng/lidong/models/Qwen2.5-Coder-0.5B-Instruct')
+                        default='../models/starcoder2-7b')
+    parser.add_argument('--sec_model', type=str,
+                        default='../models/Qwen2.5-Coder-0.5B-Instruct')
     parser.add_argument('--lora', type=str,
-                        default='/home/public_space/yanmeng/lidong/code/Finetune/trained/Qwen2.5-Coder-0.5b/checkpoint-last')
+                        default='../trained/Qwen2.5-Coder-0.5b/checkpoint-last')
 
     parser.add_argument('--sparse_matrix_path', type=str,
-                        default='/home/public_space/yanmeng/lidong/code/one4all/try_EVA_like/map_files/Qwen_to_DeepSeek_sim_matrix.npz')
+                        default='../map_files/Qwen_to_DeepSeek_sim_matrix.npz')
     parser.add_argument('--token_map', type=str,
-                        default='/home/public_space/yanmeng/lidong/code/one4all/token_map/main2assist/DeepSeek2Qwen/one2one_DeepSeek2Qwen_id.json')
+                        default='../token_map/main2assist/DeepSeek2Qwen/one2one_DeepSeek2Qwen_id.json')
 
     parser.add_argument('--experiments_dir', type=str, default='../experiments')
     parser.add_argument('--data_dir', type=str, default='../data_eval')

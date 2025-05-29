@@ -11,8 +11,8 @@ import torch
 from transformers import AutoTokenizer, AutoConfig, AutoModelForCausalLM
 
 from Ensemble_model import EnsembleModel
-from constants import PRETRAINED_MODELS, SECURITY_MODELS
-from try_plugin_like.my_model import myQwenForCausalLM
+from constant import PRETRAINED_MODELS, SECURITY_MODELS
+
 
 logger = logging.getLogger()
 
@@ -131,15 +131,15 @@ def load_model(model_name=None, args=None, ref=False):
         tokenizer = AutoTokenizer.from_pretrained(args.trg_model)
         trg_model.resize_token_embeddings(len(tokenizer))
 
-        src_model = AutoModelForCausalLM.from_pretrained(args.src_model, torch_dtype=torch.bfloat16)
-        src_tokenizer = AutoTokenizer.from_pretrained(args.src_model)
-        src_model.resize_token_embeddings(len(src_tokenizer))
-        src_model = peft.PeftModel.from_pretrained(src_model, args.lora)
+        sec_model = AutoModelForCausalLM.from_pretrained(args.sec_model, torch_dtype=torch.bfloat16)
+        sec_tokenizer = AutoTokenizer.from_pretrained(args.sec_model)
+        sec_model.resize_token_embeddings(len(sec_tokenizer))
+        sec_model = peft.PeftModel.from_pretrained(sec_model, args.lora)
 
         model = EnsembleModel(
-            src_model=src_model,
+            sec_model=sec_model,
             trg_model=trg_model,
-            src_tokenizer=src_tokenizer,
+            sec_tokenizer=sec_tokenizer,
             trg_tokenizer=tokenizer,
             sparse_matrix_path=args.sparse_matrix_path,
             token_map=args.token_map,
